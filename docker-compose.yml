@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  compact-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: compact-service
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - LOG_LEVEL=info
+    volumes:
+      # Mount compactc binary from host (adjust path as needed)
+      - /usr/local/bin/compactc:/usr/local/bin/compactc:ro
+      - /usr/local/bin/zkir:/usr/local/bin/zkir:ro
+      # Persistent data
+      - compact_logs:/app/logs
+      - compact_temp:/app/temp
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - compact-network
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: compact-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # For SSL certificates (if using)
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - compact-service
+    networks:
+      - compact-network
+    profiles:
+      - with-proxy
+
+volumes:
+  compact_logs:
+    driver: local
+  compact_temp:
+    driver: local
+
+networks:
+  compact-network:
+    driver: bridge 
