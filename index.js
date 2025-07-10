@@ -18,34 +18,80 @@ app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
     message: 'Compact Compiler Service for Web3Fast',
-    service: 'compact-compiler'
+    service: 'compact-compiler',
+    versions: ['0.23.0', '0.24.0']
   });
 });
 
-// Check if compactc is available
+// Check compiler availability and versions
 app.get('/check-compiler', async (req, res) => {
   try {
+    const versions = {};
+    
+    // Check 0.24.0
+    try {
+      const { stdout } = await execAsync('/usr/local/bin/compact-0.24.0/compactc --version');
+      versions['0.24.0'] = stdout.trim();
+    } catch (error) {
+      versions['0.24.0'] = 'Not available';
+    }
+    
+    // Check 0.23.0
+    try {
+      const { stdout } = await execAsync('/usr/local/bin/compact-0.23.0/compactc --version');
+      versions['0.23.0'] = stdout.trim();
+    } catch (error) {
+      versions['0.23.0'] = 'Not available';
+    }
+    
+    // Check default
     const { stdout } = await execAsync('compactc --version');
+    
     res.json({
       success: true,
       available: true,
-      version: stdout.trim(),
-      message: 'Compact compiler is available'
+      defaultVersion: stdout.trim(),
+      versions: versions,
+      message: 'Compact compiler service with dual version support'
     });
   } catch (error) {
     res.json({
       success: false,
       available: false,
       error: 'compactc not found in PATH',
-      message: 'Please install the Compact compiler from https://docs.midnight.network/relnotes/compact'
+      message: 'Please install the Compact compiler'
     });
   }
 });
 
-// Compilation endpoint
+// Get available compiler versions
+app.get('/api/compiler-versions', (req, res) => {
+  const versions = {
+    available: ['0.23.0', '0.24.0'],
+    default: '0.24.0',
+    recommended: {
+      'openzeppelin-examples': '0.23.0',
+      'new-development': '0.24.0',
+      'assert-statements': '0.23.0',
+      'latest-syntax': '0.24.0'
+    },
+    notes: {
+      '0.23.0': 'Compatible with OpenZeppelin examples and assert statements',
+      '0.24.0': 'Latest version with breaking syntax changes'
+    }
+  };
+  res.json(versions);
+});
+
+// Compilation endpoint with version support
 app.post('/compile', async (req, res) => {
   try {
-    const { contractCode, contractName = 'contract', projectFiles = {} } = req.body;
+    const { 
+      contractCode, 
+      contractName = 'contract', 
+      compilerVersion = '0.24.0',
+      projectFiles = {} 
+    } = req.body;
 
     if (!contractCode) {
       return res.status(400).json({ 
@@ -54,7 +100,27 @@ app.post('/compile', async (req, res) => {
       });
     }
 
-    console.log(`\n🌙 Compiling Compact contract: ${contractName}`);
+    // Validate compiler version
+    const supportedVersions = ['0.23.0', '0.24.0'];
+    if (!supportedVersions.includes(compilerVersion)) {
+      return res.status(400).json({
+        success: false,
+        error: `Unsupported compiler version: ${compilerVersion}. Supported: ${supportedVersions.join(', ')}`
+      });
+    }
+
+    // Select compiler path based on version
+    const compilerPath = `/usr/local/bin/compact-${compilerVersion}/compactc`;
+    
+    // Verify compiler exists
+    if (!fs.existsSync(compilerPath)) {
+      return res.status(500).json({
+        success: false,
+        error: `Compiler not found for version ${compilerVersion}`
+      });
+    }
+
+    console.log(`\n🌙 Compiling Compact contract: ${contractName} with compactc ${compilerVersion}`);
 
     // Create temporary directory for compilation
     const tempDir = path.join(__dirname, 'temp', Date.now().toString());
@@ -75,9 +141,9 @@ app.post('/compile', async (req, res) => {
       // Output directory for compiled artifacts
       const outputDir = path.join(tempDir, 'managed', contractName);
 
-      // Run compactc compilation
-      console.log('🔧 Running compactc...');
-      const compileCommand = `compactc "${contractPath}" "${outputDir}"`;
+      // Run compactc compilation with selected version
+      console.log(`🔧 Running compactc ${compilerVersion}...`);
+      const compileCommand = `"${compilerPath}" "${contractPath}" "${outputDir}"`;
       
       const { stdout, stderr } = await execAsync(compileCommand, {
         cwd: tempDir,
@@ -113,15 +179,16 @@ app.post('/compile', async (req, res) => {
         console.warn('Warning: Could not read all generated files:', readError.message);
       }
 
-      console.log(`✅ SUCCESS! Compiled ${contractName}`);
+      console.log(`✅ SUCCESS! Compiled ${contractName} with compactc ${compilerVersion}`);
 
       res.json({
         success: true,
         contractName,
+        compilerVersion,
         artifacts,
         stdout: stdout || '',
         stderr: stderr || '',
-        message: 'Compact contract compiled successfully'
+        message: `Compact contract compiled successfully with compactc ${compilerVersion}`
       });
 
     } finally {
@@ -148,6 +215,7 @@ app.post('/compile', async (req, res) => {
 
     res.status(500).json({
       success: false,
+      compilerVersion: req.body.compilerVersion || '0.24.0',
       error: errorMessage,
       isCompilerError,
       stdout: error.stdout || '',
@@ -165,6 +233,10 @@ app.post('/api/compile', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🌙 Compact Compiler Service running on port ${PORT}`);
-  console.log(`🔗 Test: curl -X POST http://localhost:${PORT}/compile`);
+  console.log(`📦 Dual compiler support: 0.23.0 & 0.24.0`);
+  console.log(`🔗 Health check: http://localhost:${PORT}`);
+  console.log(`🔧 Compiler check: http://localhost:${PORT}/check-compiler`);
+  console.log(`📋 Versions: http://localhost:${PORT}/api/compiler-versions`);
+  console.log(`🚀 Test: curl -X POST http://localhost:${PORT}/compile`);
   console.log(`📚 Make sure compactc is installed and in your PATH`);
-}); 
+});
